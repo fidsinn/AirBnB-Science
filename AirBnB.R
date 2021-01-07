@@ -1,0 +1,433 @@
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(rpart)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(rpart.plot)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(rafalib)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(caret)
+library(data.table)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(rafalib)
+#smoothing and loess example
+# library(broom)
+# mnist_27$train %>% glm(y ~ x_2, family = "binomial", data = .) %>% tidy()
+# qplot(x_2, y, data = mnist_27$train)
+# mnist_27$train %>% 
+#   mutate(y = ifelse(y=="7", 1, 0)) %>%
+#   ggplot(aes(x_2, y)) + 
+#   geom_smooth(method = "loess")
+
+#reading the csv-file
+AirData <- read.csv("AirBnB_NYC.csv")
+
+AirData[is.na(AirData)] <- 0
+AirData %>% 
+  group_by(neighbourhood_group) %>% 
+  summarize(revMean=mean(reviews_per_month), 
+            revDist=sum(reviews_per_month==0)/sum(reviews_per_month))
+#NA values were splitted good through the neighbourhood_group for revCalc, so it is ok to set NA to 0
+
+#factorizing some data
+AirData$neighbourhood_group <- as.factor(AirData$neighbourhood_group)
+AirData$neighbourhood <- as.factor(AirData$neighbourhood)
+AirData$room_type <- as.factor(AirData$room_type)
+AirData$last_review <- as.Date(AirData$last_review)
+AirData <- AirData %>%
+  mutate(manhattan=ifelse(neighbourhood_group=="Manhattan", "manhattan", "not_manhattan"))
+AirData$manhattan <- as.factor(AirData$manhattan)
+
+#count of offers per price
+AirData %>%
+  mutate(price_round = round(price, digits=-1)) %>%
+  group_by(price_round) %>%
+  ggplot(aes(price_round)) +
+  geom_histogram(bins = 20) +
+  scale_x_continuous(trans="log10")
+
+#reviewing price data for analysis
+quantile(AirData$price, probs=c(0.005, 0.10, 0.25, 0.50, 0.75, 0.90, 0.995))
+
+#reviewing the n() of prices <= 26
+AirData %>% 
+  filter(price <= 26) %>% 
+  group_by(price) %>%
+  arrange(price) %>% 
+  summarize(n())
+
+#Listings higher than 1000 Dollar and lower 10 Dollar are treated as outliers
+AirData <- AirData %>%
+  filter(price > 0 & price <= 1000)
+
+#count of offers per minimum nights
+AirData %>%
+  ggplot(aes(minimum_nights)) +
+  geom_histogram(bins = 20, fill = "#FF6666") +
+  scale_x_log10()
+
+#reviewing minimum nights data for analysis
+quantile(AirData$minimum_nights, probs=c(0.005, 0.10, 0.25, 0.50, 0.75, 0.90, 0.995))
+
+#Listings higher than 100 minimum nights are treated as outliers
+AirData <- AirData %>%
+  filter(minimum_nights <= 100)
+
+#count of offers per calculated_host_listings_count
+AirData %>%
+  ggplot(aes(calculated_host_listings_count)) +
+  geom_histogram(bins = 20, fill = "#FF6666") +
+  scale_x_log10()
+
+#reviewing calculated_host_listings_count data for analysis
+quantile(AirData$calculated_host_listings_count, probs=c(0.005, 0.10, 0.25, 0.50, 0.75, 0.90, 0.995))
+
+#count of offers per availability_365
+AirData %>%
+  ggplot(aes(availability_365)) +
+  geom_histogram(bins = 20, fill = "#FF6666") +
+  scale_x_log10()
+
+#count of listings per number_of_reviews
+AirData %>%
+  group_by(number_of_reviews) %>%
+  ggplot(aes(number_of_reviews)) +
+  geom_histogram(bins = 20, fill = "#FF6666")
+
+
+
+
+
+
+#Split into train data and test data
+set.seed(1, sample.kind="Rounding") # if using R 3.5 or earlier, use `set.seed(1)`
+test_index <- createDataPartition(y = AirData$neighbourhood_group, times = 1, p = 0.2, list = FALSE)
+train_set <- AirData[-test_index,]
+test_set <- AirData[test_index,]
+
+##PRE-ANALYSIS
+#location
+#x=longitude, y=latitude
+train_set %>%
+  ggplot(aes(longitude, latitude, col=neighbourhood_group)) +
+  geom_point() #+ theme(legend.position = "none")
+
+#groups count
+train_set %>%
+  group_by(neighbourhood_group) %>%
+  summarize(offerings=n())
+
+#price neighbourhood_group
+train_set %>%
+  group_by(neighbourhood_group) %>%
+  summarize(mean_price=mean(price), med_price=median(price))
+
+#price by longitude
+train_set %>%
+  ggplot(aes(longitude, price, col=neighbourhood_group)) +
+  geom_point()
+
+#price by neighbourhood boxplot
+train_set %>%
+  select(neighbourhood_group, neighbourhood, price) %>%
+  ggplot(aes(y=price)) +
+  geom_boxplot() +
+  scale_y_continuous(trans="log10") +
+  facet_grid(. ~ neighbourhood_group) +
+  xlab("")
+
+#room_type in each neighbourhood_group
+train_set %>%
+  group_by(neighbourhood_group) %>%
+  summarize(room=mean(room_type=="Private room"), 
+            apt=mean(room_type=="Entire home/apt"), 
+            shared=mean(room_type=="Shared room"))
+
+train_set %>%
+  group_by(neighbourhood_group) %>%
+  summarize(room=mean(room_type=="Private room"), 
+           apt=mean(room_type=="Entire home/apt"), 
+           shared=mean(room_type=="Shared room")) %>%
+  gather(room_type, percent, room:shared) %>%
+  ggplot(aes(x=neighbourhood_group, y=percent, fill=room_type)) +
+  geom_bar(position = "fill", stat="identity")
+
+#minimum nights in each neighbourhood_group
+train_set %>%
+  group_by(neighbourhood_group) %>%
+  summarize(min_nights=mean(minimum_nights))
+
+#geographical availability
+train_set %>%
+  ggplot(aes(longitude, latitude, color=availability_365)) +
+  geom_point()
+
+#geographical ratings
+train_set%>%
+  filter(number_of_reviews<50) %>%
+  ggplot(aes(longitude, latitude, color=number_of_reviews)) +
+  geom_point(alpha=0.7)
+
+#several observations on neighbourhood_groups
+train_set %>%
+  group_by(neighbourhood_group) %>%
+  summarize(mean_price=mean(price),
+            med_rpice=median(price),
+            apt=mean(room_type=="Entire home/apt"),
+            room=mean(room_type=="Private room"),
+            shared=mean(room_type=="Shared room"),
+            min_nights=mean(minimum_nights),
+            calc_hlc=mean(calculated_host_listings_count),
+            ava=mean(availability_365),
+            # rev=mean(number_of_reviews)
+  )
+
+
+
+
+
+
+
+#METHODS
+
+#smoothing of average price by longitude (local weighted regression)
+train_set_mprice <- train_set %>%
+  mutate(l=round(longitude, digits=2)) %>%
+  group_by(l) %>% 
+  summarize(n=n(), 
+            mprice=mean(price), 
+            manh=mean(neighbourhood_group=="Manhattan")) %>%
+  filter(n>=10)
+
+min_Manh_long <- min(train_set %>% filter(neighbourhood_group=="Manhattan") %>% select(longitude))
+max_Manh_long <- max(train_set %>% filter(neighbourhood_group=="Manhattan") %>% select(longitude))
+
+train_set_mprice %>% 
+  ggplot(aes(l, mprice, col=manh)) + 
+  geom_point(size=3) + 
+  geom_smooth(color="orange", 
+              span = 0.25, 
+              method = "loess", 
+              method.args = list(degree=1)) +
+  geom_vline(xintercept = min_Manh_long) +
+  geom_vline(xintercept = max_Manh_long)
+
+#ANALYSIS FOR LM
+#filter rounded price groupings with n()>=5
+glm_pre <- train_set %>%
+  mutate(price_round = round(price, digits=-1)) %>%
+  group_by(price_round) %>%
+  mutate(n=n()) %>%
+  filter(n>=5) %>%
+  ungroup() %>%
+  select(-price_round, -n)
+#Proportion manhattan listings per price in tens 
+glm_pre %>%
+  mutate(price_round = round(price, digits=-1)) %>%
+  group_by(price_round) %>%
+  summarize(n=n(), proportion_manhattan=mean(neighbourhood_group=="Manhattan")) %>%
+  mutate(proportion_manhattan = round(proportion_manhattan, digits=2)) %>%
+  ggplot(aes(price_round, proportion_manhattan)) +
+  geom_point() +
+  geom_text(aes(label=proportion_manhattan))
+
+
+#Proportion room type 'Apartment' per price
+glm_pre %>%
+  mutate(price_round = round(price, digits=-1)) %>%
+  group_by(price_round) %>%
+  summarize(n=n(), mrt=mean(room_type=="Entire home/apt")) %>%
+  mutate(mrt = round(mrt, digits=2)) %>%
+  ggplot(aes(price_round, mrt)) +
+  geom_point() +
+  geom_text(aes(label=mrt))
+
+#linear regression for categorical outcomes
+#as we can see in the plot before there a few individual points where the price is >500 and the mean of manhattan is =0. So we will delete these for the training of the lm
+
+## This is normal lm?! dont need it
+# lm_fit <- train_set %>%
+#   mutate(y = as.numeric(manhattan=="manhattan")) %>%
+#   lm(y ~ price, data = .)
+# 
+# p_hat <- predict(lm_fit, test_set)
+# y_hat <- ifelse(p_hat>0.5, "manhattan", "not_manhattan") %>% factor()
+# confusionMatrix(y_hat, test_set$manhattan)#$overall["Accuracy"]
+
+#logistic regression model (listing in manhattan with several predictors)
+glm_fit <- glm_pre %>% 
+  mutate(y = as.numeric(manhattan == "manhattan")) %>%
+  glm(y ~ host_id +
+        room_type +
+        price +
+        minimum_nights +
+        number_of_reviews +
+        reviews_per_month +
+        calculated_host_listings_count +
+        availability_365
+      , data=., family = "binomial")
+p_hat_logit <- predict(glm_fit, newdata = test_set, type = "response")
+
+y_hat_logit <- ifelse(p_hat_logit > 0.5, "manhattan", "not_manhattan") %>% factor
+confusionMatrix(y_hat_logit, test_set$manhattan)#$overall[["Accuracy"]]
+
+#logistic regression model (listing in manhattan with price as predictor)
+glm_fit <- glm_pre %>%
+  mutate(y = as.numeric(manhattan == "manhattan")) %>%
+  glm(y ~ price, data=., family = "binomial")
+p_hat_logit <- predict(glm_fit, newdata = test_set, type = "response")
+
+y_hat_logit <- ifelse(p_hat_logit > 0.5, "manhattan", "not_manhattan") %>% factor
+confusionMatrix(y_hat_logit, test_set$manhattan)#$overall[["Accuracy"]]
+
+tmp <- train_set %>% 
+  mutate(x = round(price, digits=-1)) %>%
+  group_by(x) %>%
+  filter(n() >= 5) %>%
+  summarize(prop = mean(manhattan == "manhattan"))
+logistic_curve <- data.frame(x = seq(min(tmp$x), max(tmp$x))) %>%
+  mutate(p_hat = plogis(glm_fit$coef[1] + glm_fit$coef[2]*x))
+tmp %>% 
+  ggplot(aes(x, prop)) +
+  geom_point() +
+  geom_line(data = logistic_curve, mapping = aes(x, p_hat), lty = 2) +
+  xlab("price") +
+  ylab("proportion")
+
+# #GLM TUTORIAL (why different accuracies between my lm(cat) and glm?)
+# #generalized lm (for one or several predictors)
+# fit_log <- glm_pre %>%
+#   glm(manhattan=="manhattan" ~ price, data=., family = "binomial")
+# #or
+# #glm_fit <- train_set %>%
+# #mutate(y=as.numeric(manhattan=="manhattan")) %>%
+# #glm(y ~ price, data=., family = "binomial")
+# p_hat_log <- predict(fit_log, newdata = test_set, type = "response")
+# y_hat_log <- factor(ifelse(p_hat_log > 0.50, "manhattan", "not_manhattan"))
+# confusionMatrix(data=y_hat_log, reference=test_set$manhattan)$overall["Accuracy"]
+
+#10-FOLD CROSS VALIDATION
+control <- trainControl(method = "cv", number = 10, p = .9)
+
+#KNN train needs long time
+m_knn <- train_set %>%
+  train(manhattan~host_id +
+        room_type +
+        price +
+        minimum_nights +
+        number_of_reviews +
+        calculated_host_listings_count +
+        availability_365,
+        method="knn",
+        data=.,
+        tuneGrid = data.frame(k = seq(5))
+        #trControl=control
+  )
+m_p_hat_knn <- predict(m_knn, test_set, type = "raw")
+confusionMatrix(m_p_hat_knn, test_set$manhattan)#$overall["Accuracy"]
+
+#DECISION TREE 
+#(only using selected predictors for decision tree and random forest which are useful)
+dec_fit <- glm_pre %>%
+  select(host_id,
+         room_type,
+         price,
+         minimum_nights,
+         number_of_reviews,
+         calculated_host_listings_count,
+         availability_365,
+         manhattan
+  ) %>%
+  rpart(manhattan ~ ., data=., model=TRUE)
+fit_pred <- predict(dec_fit, test_set, type="class")
+confusionMatrix(table(fit_pred, test_set$manhattan))
+rpart.plot(dec_fit) ##???
+# plot(dec_fit, margin=0.1)
+# text(dec_fit, cex = 0.75)
+
+glm_pre %>%
+  ggplot(aes(room_type, price, col=manhattan, size=calculated_host_listings_count)) +
+  geom_point(alpha=0.2)+
+  scale_y_continuous(trans="log2")
+
+# #decision tree for price prediction
+# dec_test_fit <- train_set %>%
+#   select(host_id,
+#          room_type,
+#          neighbourhood_group,
+#          minimum_nights,
+#          number_of_reviews,
+#          calculated_host_listings_count,
+#          availability_365,
+#          price
+#   ) %>%
+#   rpart(price ~ ., data=., model=TRUE)
+# rpart.plot(dec_test_fit) ##???
+
+#RANDOM FORESTS
+forest_fit <- train_set %>%
+  select(host_id,
+         room_type,
+         price,
+         minimum_nights,
+         number_of_reviews,
+         calculated_host_listings_count,
+         availability_365,
+         manhattan
+  ) %>%
+  randomForest(manhattan ~ ., data=.)
+
+forest_p_hat <- predict(forest_fit, test_set)
+confusionMatrix(forest_p_hat, test_set$manhattan)#$overall["Accuracy"]
+
+rafalib::mypar()
+plot(forest_fit)
+
+#optimize RF
+nodesize <- seq(1, 51, 10)
+acc <- sapply(nodesize, function(ns){
+  train(manhattan ~ host_id +
+        room_type +
+        price +
+        minimum_nights +
+        number_of_reviews +
+        calculated_host_listings_count +
+        availability_365, method = "rf", data = train_set,
+        tuneGrid = data.frame(mtry = 2),
+        nodesize = ns)$results$Accuracy
+})
+qplot(nodesize, acc)
+
+#run optimized RF
+forest_fit2 <- train_set %>%
+  select(host_id,
+         room_type,
+         price,
+         minimum_nights,
+         number_of_reviews,
+         calculated_host_listings_count,
+         availability_365,
+         manhattan
+  ) %>%
+  randomForest(manhattan ~ ., data=., nodesize = nodesize[which.max(acc)])
+forest_p_hat2 <- predict(forest_fit2, test_set)
+confusionMatrix(forest_p_hat2, test_set$manhattan)#$overall["Accuracy"]
+
+# #forest test fit
+# forest_test_fit <- train_set %>%
+#   select(host_id,
+#          room_type,
+#          neighbourhood_group,
+#          neighbourhood,
+#          latitude,
+#          longitude,
+#          minimum_nights,
+#          number_of_reviews,
+#          calculated_host_listings_count,
+#          availability_365,
+#          price
+#   ) %>%
+#   randomForest(price ~ ., data=.)
