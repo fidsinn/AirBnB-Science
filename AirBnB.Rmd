@@ -380,7 +380,7 @@ tmp %>%
 #### Decision Tree
 To improve the accuracy of predicting a listing better and to find out decisive predictors the next model is the Decision Tree.  
 
-```{r decision_tree}
+```{r decision_tree, echo=TRUE}
 dec_fit <- glm_pre %>%
   select(host_id,
          room_type,
@@ -395,3 +395,10 @@ dec_fit <- glm_pre %>%
 fit_pred <- predict(dec_fit, test_set, type="class")
 confusionMatrix(table(fit_pred, test_set$manhattan))$overall[["Accuracy"]]
 ```
+
+You can see a slight improvement over the previous model.  
+This is how the Decision Tree looks like:
+```{r decision_tree_plot, echo=TRUE}
+rpart.plot(dec_fit)
+```
+The Tree uses price, host listings count and room type as the predictors to get the best result to decide whether the listing is in Manhattan or in another neighbourhood.
