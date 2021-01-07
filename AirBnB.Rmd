@@ -33,18 +33,23 @@ I worked with data from 2019 including informations about New York based AirBnB 
 You can find the data in this github.  
 
 ```{r setup1, include=FALSE}
-#knitr::opts_chunk$set(echo = TRUE)
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
 if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(e1071)) install.packages("data.table", repos = "http://cran.us.r-project.org")
 if(!require(rpart)) install.packages("data.table", repos = "http://cran.us.r-project.org")
 if(!require(rpart.plot)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(rafalib)) install.packages("data.table", repos = "http://cran.us.r-project.org")
 
 library(tidyverse)
 library(caret)
 library(data.table)
+library(e1071)
 library(rpart)
 library(rpart.plot)
+library(randomForest)
+library(rafalib)
 ```
 
 ```{r setup2}
@@ -401,4 +406,7 @@ This is how the Decision Tree looks like:
 ```{r decision_tree_plot, echo=TRUE}
 rpart.plot(dec_fit)
 ```
+
+***
+
 The Tree uses price, host listings count and room type as the predictors to get the best result to decide whether the listing is in Manhattan or in another neighbourhood.

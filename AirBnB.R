@@ -1,6 +1,7 @@
 if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
 if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
 if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(e1071)) install.packages("data.table", repos = "http://cran.us.r-project.org")
 if(!require(rpart)) install.packages("data.table", repos = "http://cran.us.r-project.org")
 if(!require(rpart.plot)) install.packages("data.table", repos = "http://cran.us.r-project.org")
 if(!require(randomForest)) install.packages("data.table", repos = "http://cran.us.r-project.org")
@@ -9,6 +10,7 @@ if(!require(rafalib)) install.packages("data.table", repos = "http://cran.us.r-p
 library(tidyverse)
 library(caret)
 library(data.table)
+library(e1071)
 library(rpart)
 library(rpart.plot)
 library(randomForest)
@@ -312,22 +314,22 @@ tmp %>%
 #10-FOLD CROSS VALIDATION
 control <- trainControl(method = "cv", number = 10, p = .9)
 
-#KNN train needs long time
-m_knn <- train_set %>%
-  train(manhattan~host_id +
-        room_type +
-        price +
-        minimum_nights +
-        number_of_reviews +
-        calculated_host_listings_count +
-        availability_365,
-        method="knn",
-        data=.,
-        tuneGrid = data.frame(k = seq(5))
-        #trControl=control
-  )
-m_p_hat_knn <- predict(m_knn, test_set, type = "raw")
-confusionMatrix(m_p_hat_knn, test_set$manhattan)#$overall["Accuracy"]
+# #KNN train needs long time
+# m_knn <- train_set %>%
+#   train(manhattan~host_id +
+#         room_type +
+#         price +
+#         minimum_nights +
+#         number_of_reviews +
+#         calculated_host_listings_count +
+#         availability_365,
+#         method="knn",
+#         data=.,
+#         tuneGrid = data.frame(k = seq(5))
+#         #trControl=control
+#   )
+# m_p_hat_knn <- predict(m_knn, test_set, type = "raw")
+# confusionMatrix(m_p_hat_knn, test_set$manhattan)#$overall["Accuracy"]
 
 #DECISION TREE 
 #(only using selected predictors for decision tree and random forest which are useful)
@@ -386,35 +388,35 @@ confusionMatrix(forest_p_hat, test_set$manhattan)#$overall["Accuracy"]
 rafalib::mypar()
 plot(forest_fit)
 
-#optimize RF
-nodesize <- seq(1, 51, 10)
-acc <- sapply(nodesize, function(ns){
-  train(manhattan ~ host_id +
-        room_type +
-        price +
-        minimum_nights +
-        number_of_reviews +
-        calculated_host_listings_count +
-        availability_365, method = "rf", data = train_set,
-        tuneGrid = data.frame(mtry = 2),
-        nodesize = ns)$results$Accuracy
-})
-qplot(nodesize, acc)
+# #optimize RF
+# nodesize <- seq(1, 51, 10)
+# acc <- sapply(nodesize, function(ns){
+#   train(manhattan ~ host_id +
+#         room_type +
+#         price +
+#         minimum_nights +
+#         number_of_reviews +
+#         calculated_host_listings_count +
+#         availability_365, method = "rf", data = train_set,
+#         tuneGrid = data.frame(mtry = 2),
+#         nodesize = ns)$results$Accuracy
+# })
+# qplot(nodesize, acc)
 
-#run optimized RF
-forest_fit2 <- train_set %>%
-  select(host_id,
-         room_type,
-         price,
-         minimum_nights,
-         number_of_reviews,
-         calculated_host_listings_count,
-         availability_365,
-         manhattan
-  ) %>%
-  randomForest(manhattan ~ ., data=., nodesize = nodesize[which.max(acc)])
-forest_p_hat2 <- predict(forest_fit2, test_set)
-confusionMatrix(forest_p_hat2, test_set$manhattan)#$overall["Accuracy"]
+# #run optimized RF
+# forest_fit2 <- train_set %>%
+#   select(host_id,
+#          room_type,
+#          price,
+#          minimum_nights,
+#          number_of_reviews,
+#          calculated_host_listings_count,
+#          availability_365,
+#          manhattan
+#   ) %>%
+#   randomForest(manhattan ~ ., data=., nodesize = nodesize[which.max(acc)])
+# forest_p_hat2 <- predict(forest_fit2, test_set)
+# confusionMatrix(forest_p_hat2, test_set$manhattan)#$overall["Accuracy"]
 
 # #forest test fit
 # forest_test_fit <- train_set %>%
