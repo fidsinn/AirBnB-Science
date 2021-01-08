@@ -66,10 +66,27 @@ With this report I want to work with different analysis and methods to predict w
 
 ## 2. Analysis and methods
 ### Data cleaning and exploration
-First step is cleaning the data of NA values. We can see NA values in "reviews_per_month", so we change these values to 0.  
+First step is deleting columns host_name and last_review as we don't need them. Next step is cleaning the data of NA values. We can see NA values in "reviews_per_month", so we change these values to 0.  
 This step has not much influence on the distribution between the neighbourhod_groups as we can see at the distribution of NA values (revDist):
 ```{r cleaning1Control, echo=FALSE}
+AirData %>% filter(is.na(id)) %>% summarize(n())
+AirData %>% filter(is.na(name)) %>% summarize(n())
+AirData %>% filter(is.na(host_id)) %>% summarize(n())
+AirData %>% filter(is.na(neighbourhood_group)) %>% summarize(n())
+AirData %>% filter(is.na(neighbourhood)) %>% summarize(n())
+AirData %>% filter(is.na(latitude)) %>% summarize(n())
+AirData %>% filter(is.na(longitude)) %>% summarize(n())
+AirData %>% filter(is.na(room_type)) %>% summarize(n())
+AirData %>% filter(is.na(price)) %>% summarize(n())
+AirData %>% filter(is.na(minimum_nights)) %>% summarize(n())
+AirData %>% filter(is.na(number_of_reviews)) %>% summarize(n())
+AirData %>% filter(is.na(reviews_per_month)) %>% summarize(n())
+AirData %>% filter(is.na(calculated_host_listings_count)) %>% summarize(n())
+AirData %>% filter(is.na(availability_365)) %>% summarize(n())
 AirData[is.na(AirData)] <- 0
+AirData <- AirData %>%
+  select(-last_review, 
+         -host_name)
 AirData %>% 
   group_by(neighbourhood_group) %>% 
   summarize(revMean=mean(reviews_per_month), revDist=sum(reviews_per_month==0)/sum(reviews_per_month))
@@ -80,7 +97,6 @@ Some columns had to be factorized or changed to date.
 AirData$neighbourhood_group <- as.factor(AirData$neighbourhood_group)
 AirData$neighbourhood <- as.factor(AirData$neighbourhood)
 AirData$room_type <- as.factor(AirData$room_type)
-AirData$last_review <- as.Date(AirData$last_review)
 ```
 
 As we want to use different methods to predict an offering to be located in manhattan or not, we will add this to a column:
@@ -119,7 +135,7 @@ AirData <- AirData %>%
   filter(price > 0 & price <= 1000)
 ```
 
-We also shorten the minimum nights to maximum 100 nights, defining more than 100 nights as outliers:  
+We also shorten the minimum nights to maximum 365 nights, defining more than one year as outliers:  
 ```{r minimum_nights_Quantile, echo=TRUE}
 AirData %>%
   ggplot(aes(minimum_nights)) +
@@ -130,7 +146,7 @@ quantile(AirData$minimum_nights, probs=c(0.005, 0.10, 0.25, 0.50, 0.75, 0.90, 0.
 
 ```{r minimum_nights_Quantile2, echo=TRUE}
 AirData <- AirData %>%
-  filter(minimum_nights <= 100)
+  filter(minimum_nights < 365)
 ```
 
 The calculated host listings tell us how many listings each host has:  
@@ -288,25 +304,27 @@ train_set %>%
 
 We can see that Manhattan and Brooklyn had the lowest availability in 2019. An effect maybe caused by the central location of those two neighbourhoods.  
 
+***
+
 ### Modeling approach
 With the insight from the data visualization we can suspect to have some good fundamentals for the modeling approaches to predict whether a listing is in Manhattan or in another neighbourhood. For this purpose we use several predictors from the train_set:  
 
 We will use selected information as predictors like price, room type, minimum nights, number of reviews, host listings count, availability and host_id.  
 
-It is not beneficial to use all of the variables found in the dataset. Because we wont work with word detection the names of listings wont be used in the modeling approaches. Moreover we wont use the neighbourhood and longitude and latitude because those would already have too much predictive power. These approaches would bring an accuracy of around 99%-100%, which would not make sense for our goal of using several predictors to predict the right categorical outcome of Manhattan or not Manhattan.
+It is not beneficial to use all of the variables found in the dataset. Because we wont work with word detection the names of listings wont be used in the modeling approaches. Moreover we wont use the neighbourhood and longitude and latitude because those would already have too much predictive power and would only predict one measure of location by another measure of location. These approaches would bring an accuracy of around 99%-100%, which would not make sense for our goal of using several predictors to predict the right categorical outcome of Manhattan or not Manhattan.
 
 ***
 
 #### Logistic regression
 Getting started with the first model we will use logistic regression because the outcome we force to predict is categorical data.  
-At the proportion of Manhattan listings per price we can see some kind of a curve where the proportion of Manhattan listings increases by price and stands on a solid high level from 250 Dollars:
+For the next observations we round the prices (e.g. 12 -> 10) and group them. Groupings with less than 3 listings get erased to prevent the analysis from outliers. At the proportion of Manhattan listings per price we can see some kind of a curve where the proportion of Manhattan listings increases by price and stands on a solid high level from 250 Dollars on. 
 ```{r lm_analysis, echo=TRUE}
 #filter rounded price groupings with n()>=5
 glm_pre <- train_set %>%
   mutate(price_round = round(price, digits=-1)) %>%
   group_by(price_round) %>%
   mutate(n=n()) %>%
-  filter(n>=5) %>%
+  filter(n>=3) %>%
   ungroup() %>%
   select(-price_round, -n)
 
@@ -317,7 +335,9 @@ glm_pre %>%
   mutate(proportion_manhattan = round(proportion_manhattan, digits=2)) %>%
   ggplot(aes(price_round, proportion_manhattan)) +
   geom_point() +
-  geom_text(aes(label=proportion_manhattan))
+  geom_text(aes(label=proportion_manhattan)) +
+  xlab("price (rounded)") +
+  ylab("Manhattan listings")
 ```
 
 ***
@@ -331,7 +351,9 @@ glm_pre %>%
   mutate(mrt = round(mrt, digits=2)) %>%
   ggplot(aes(price_round, mrt)) +
   geom_point() +
-  geom_text(aes(label=mrt))
+  geom_text(aes(label=mrt)) +
+  xlab("price (rounded)") +
+  ylab("Entire home/apt listings")
 ```
 
 ***
@@ -352,6 +374,7 @@ glm_fit <- glm_pre %>%
 p_hat_logit <- predict(glm_fit, newdata = test_set, type = "response")
 y_hat_logit <- ifelse(p_hat_logit > 0.5, "manhattan", "not_manhattan") %>% factor
 confusionMatrix(y_hat_logit, test_set$manhattan)
+glm_acc <- confusionMatrix(y_hat_logit, test_set$manhattan)$overall[["Accuracy"]]
 ```
 
 The accuracy for this model is at 0.6547. The specificity is much higher than the sensitivity. This shows that the most listings outside of Manhattan were predicted correctly while more than half of the listings from Manhattan were predicted to be outside of Manhattan.  
@@ -364,14 +387,14 @@ glm_fit <- glm_pre %>%
 p_hat_logit <- predict(glm_fit, newdata = test_set, type = "response")
 
 y_hat_logit <- ifelse(p_hat_logit > 0.5, "manhattan", "not_manhattan") %>% factor
-confusionMatrix(y_hat_logit, test_set$manhattan)$overall[["Accuracy"]]
+glm_price_acc <- confusionMatrix(y_hat_logit, test_set$manhattan)$overall[["Accuracy"]]
 ```
 
 ***
 
 If we now draw a logistic curve on the proportion of Manhattan for prices we get a way more accurate fit than with a simple line:  
 ```{r logistic_curve, echo=TRUE}
-tmp <- train_set %>% 
+tmp <- glm_pre %>% 
   mutate(x = round(price, digits=-1)) %>%
   group_by(x) %>%
   filter(n() >= 5) %>%
@@ -383,15 +406,31 @@ tmp %>%
   geom_point() +
   geom_line(data = logistic_curve, mapping = aes(x, p_hat), lty = 2) +
   xlab("price") +
-  ylab("proportion")
+  ylab("Manhattan listings")
 ```
+The proportion of Manhattan listings by price seems to show a limited growth.  
 
 ***
 
+#### K-nearest neighbours
+I already told before that some attributes wont be taken into account because they would just predict a location measure by another location measure. To show this we will, just for investigation purposes, run the knn-model with longitude and latitude as predictors for the neighbourhood prediction:
+```{r knn, echo=TRUE}
+m_knn <- train_set %>%
+  train(manhattan~longitude+latitude,
+        method="knn",
+        data=.,
+        tuneGrid = data.frame(k = seq(5))
+        #trControl=control
+  )
+m_p_hat_knn <- predict(m_knn, test_set, type = "raw")
+confusionMatrix(m_p_hat_knn, test_set$manhattan)$overall["Accuracy"]
+```
+This model shows that we are close to predict every listing in the test set correctly. So lets continue.
+
 #### Decision tree
-To improve the accuracy of predicting a listing that we already got from the logistic regression and to find out decisive predictors the next model I have chosen is the decision tree:  
+To improve the accuracy of predicting a listing that we already got from the logistic regression and to find out decisive predictors the next model I have chosen is the decision tree. An advantage of the decision trees is their good visual interpretability:  
 ```{r decision_tree, echo=TRUE}
-dec_fit <- glm_pre %>%
+dec_fit <- train_set %>%
   select(host_id,
          room_type,
          price,
@@ -403,7 +442,8 @@ dec_fit <- glm_pre %>%
   ) %>%
   rpart(manhattan ~ ., data=., model=TRUE)
 fit_pred <- predict(dec_fit, test_set, type="class")
-confusionMatrix(table(fit_pred, test_set$manhattan))$overall[["Accuracy"]]
+confusionMatrix(table(fit_pred, test_set$manhattan))
+dt_acc <- confusionMatrix(table(fit_pred, test_set$manhattan))$overall[["Accuracy"]]
 ```
 
 You can see a slight improvement over the previous model. Now the accuracy is at 0.6775.   
@@ -428,6 +468,7 @@ glm_pre %>%
 Here we can observe the branches we already had in the decision tree. Most listings <96 Dollars are not in Manhattan. Most listings >=96 Dollars and with a high host listings count are Manhattan based. Those with a price >=164 Dollars are mostly Manhattan based.
 
 #### Random forests
+Trying to improve the prediction performance of the previous modeling approach we use the random forest as an average of multiple decision trees.
 ```{r random_forest, echo=TRUE}
 forest_fit <- train_set %>%
   select(host_id,
@@ -440,9 +481,11 @@ forest_fit <- train_set %>%
          manhattan
   ) %>%
   randomForest(manhattan ~ ., data=., ntree=500)
-forest_p_hat <- predict(forest_fit, test_set)
-confusionMatrix(forest_p_hat, test_set$manhattan)#$overall["Accuracy"]
+forest_p_hat <- predict(forest_fit, test_set, type="response")
+confusionMatrix(forest_p_hat, test_set$manhattan)
+rf_acc <- confusionMatrix(forest_p_hat, test_set$manhattan)$overall["Accuracy"]
 ```
+With a random forest of 500 trees the accuracy rises to 0.7159.
 
 ```{r random_forest_plot, echo=TRUE}
 rafalib::mypar()
@@ -451,6 +494,20 @@ plot(forest_fit)
 
 ***
 
-## 3. Results  
+As we can see from the previous plot the Out-of-bag error is at 27.55%, the class error of manhattan is at 34.80% and the class error of not_manhattan is at 21.82% if we use 500 trees. It seems not necessary to increase the ntree-parameter because after 100 trees there is only marginal variation on each error.
 
+## 3. Results  
+As we can see from the confusion matrix of each modeling approach we get differently accurate results:
+```{r result_tibble, echo=FALSE}
+tibble(Method=c("glm accuracy", "glm accuracy (only price)", "decision tree accuracy", "random forest accuracy"), Accuracy=c(glm_acc, glm_price_acc, dt_acc, rf_acc)) %>%
+  knitr::kable()
+```
+The random forest approach brings the highest accuracy.
 ## 4. Conclusion  
+From the different analysis and modelings we now have an insight on how much the different informations about AirBnB listings have an influence on how to predict in which neighbourhood group a listing is.
+In different methods we've already seen that the price is a recommended predictor for the neighbourhood prediction.  
+The highest overall accuracy is at 0.7167. This means that around every fourth listing will be predicted incorrectly to be in a neighbourhood group in which it is actually not.  
+
+***
+
+As we've seen there are some significant differences between the neighbourhood groups in New York, especially between Manhattan and other neighbourhoods. As a next step we could for example run analysis and models to predict the prices of listings and analyse whether signs of gentrification are recognizable in neighbourhoods.

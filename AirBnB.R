@@ -19,21 +19,41 @@ library(rafalib)
 #reading the csv-file
 AirData <- read.csv("AirBnB_NYC.csv")
 
+#factorizing of some data
+AirData$neighbourhood_group <- as.factor(AirData$neighbourhood_group)
+AirData$neighbourhood <- as.factor(AirData$neighbourhood)
+AirData$room_type <- as.factor(AirData$room_type)
+AirData <- AirData %>%
+  mutate(manhattan=ifelse(neighbourhood_group=="Manhattan", "manhattan", "not_manhattan"))
+AirData$manhattan <- as.factor(AirData$manhattan)
+
+#inspect na values
+AirData %>% filter(is.na(id)) %>% summarize(n())
+AirData %>% filter(is.na(name)) %>% summarize(n())
+AirData %>% filter(is.na(host_id)) %>% summarize(n())
+AirData %>% filter(is.na(host_name)) %>% summarize(n())
+AirData %>% filter(is.na(neighbourhood_group)) %>% summarize(n())
+AirData %>% filter(is.na(neighbourhood)) %>% summarize(n())
+AirData %>% filter(is.na(latitude)) %>% summarize(n())
+AirData %>% filter(is.na(longitude)) %>% summarize(n())
+AirData %>% filter(is.na(room_type)) %>% summarize(n())
+AirData %>% filter(is.na(price)) %>% summarize(n())
+AirData %>% filter(is.na(minimum_nights)) %>% summarize(n())
+AirData %>% filter(is.na(number_of_reviews)) %>% summarize(n())
+AirData %>% filter(is.na(reviews_per_month)) %>% summarize(n())
+AirData %>% filter(is.na(calculated_host_listings_count)) %>% summarize(n())
+AirData %>% filter(is.na(availability_365)) %>% summarize(n())
+
+#clear na with 0 at reviews_per_month and delete last_review
 AirData[is.na(AirData)] <- 0
+AirData <- AirData %>%
+  select(-last_review, 
+         -host_name)
 AirData %>% 
   group_by(neighbourhood_group) %>% 
   summarize(revMean=mean(reviews_per_month), 
             revDist=sum(reviews_per_month==0)/sum(reviews_per_month))
 #NA values were splitted good through the neighbourhood_group for revCalc, so it is ok to set NA to 0
-
-#factorizing some data
-AirData$neighbourhood_group <- as.factor(AirData$neighbourhood_group)
-AirData$neighbourhood <- as.factor(AirData$neighbourhood)
-AirData$room_type <- as.factor(AirData$room_type)
-AirData$last_review <- as.Date(AirData$last_review)
-AirData <- AirData %>%
-  mutate(manhattan=ifelse(neighbourhood_group=="Manhattan", "manhattan", "not_manhattan"))
-AirData$manhattan <- as.factor(AirData$manhattan)
 
 #count of offers per price
 AirData %>%
@@ -66,9 +86,9 @@ AirData %>%
 #reviewing minimum nights data for analysis
 quantile(AirData$minimum_nights, probs=c(0.005, 0.10, 0.25, 0.50, 0.75, 0.90, 0.995))
 
-#Listings higher than 100 minimum nights are treated as outliers
+#Listings higher than 365 minimum nights are treated as outliers
 AirData <- AirData %>%
-  filter(minimum_nights <= 100)
+  filter(minimum_nights < 365)
 
 #count of offers per calculated_host_listings_count
 AirData %>%
@@ -279,26 +299,20 @@ tmp %>%
 #10-FOLD CROSS VALIDATION
 control <- trainControl(method = "cv", number = 10, p = .9)
 
-# #KNN train needs long time
-# m_knn <- train_set %>%
-#   train(manhattan~host_id +
-#         room_type +
-#         price +
-#         minimum_nights +
-#         number_of_reviews +
-#         calculated_host_listings_count +
-#         availability_365,
-#         method="knn",
-#         data=.,
-#         tuneGrid = data.frame(k = seq(5))
-#         #trControl=control
-#   )
-# m_p_hat_knn <- predict(m_knn, test_set, type = "raw")
-# confusionMatrix(m_p_hat_knn, test_set$manhattan)#$overall["Accuracy"]
+#KNN train just for investigation purposes (needs long time)
+m_knn <- train_set %>%
+  train(manhattan~longitude+latitude,
+        method="knn",
+        data=.,
+        tuneGrid = data.frame(k = seq(5))
+        #trControl=control
+  )
+m_p_hat_knn <- predict(m_knn, test_set, type = "raw")
+confusionMatrix(m_p_hat_knn, test_set$manhattan)#$overall["Accuracy"]
 
 #DECISION TREE 
-#(only using selected predictors for decision tree and random forest which are useful)
-dec_fit <- glm_pre %>%
+#(only using selected predictors for decision tree and random forest that are useful)
+dec_fit <- train_set %>%
   select(host_id,
          room_type,
          price,
@@ -319,7 +333,7 @@ plot(dec_fit, margin=0.1)
 text(dec_fit, cex = 0.75)
 
 #predictors of decision tree in another plot
-glm_pre %>%
+train_set %>%
   ggplot(aes(room_type, price, col=manhattan, size=calculated_host_listings_count)) +
   geom_point(alpha=0.2)+
   scale_y_continuous(trans="log2")
@@ -339,6 +353,7 @@ glm_pre %>%
 # rpart.plot(dec_test_fit) ##???
 
 #RANDOM FORESTS
+#forest with multiple predictors
 forest_fit <- train_set %>%
   select(host_id,
          room_type,
@@ -351,55 +366,20 @@ forest_fit <- train_set %>%
   ) %>%
   randomForest(manhattan ~ ., data=., ntree=500)
 
-forest_p_hat <- predict(forest_fit, test_set)
+forest_p_hat <- predict(forest_fit, test_set, type="response")
 confusionMatrix(forest_p_hat, test_set$manhattan)#$overall["Accuracy"]
 
 #plot trees vs errors
 rafalib::mypar()
 plot(forest_fit)
 
-# #optimize RF
-# nodesize <- seq(1, 51, 10)
-# acc <- sapply(nodesize, function(ns){
-#   train(manhattan ~ host_id +
-#         room_type +
-#         price +
-#         minimum_nights +
-#         number_of_reviews +
-#         calculated_host_listings_count +
-#         availability_365, method = "rf", data = train_set,
-#         tuneGrid = data.frame(mtry = 2),
-#         nodesize = ns)$results$Accuracy
-# })
-# qplot(nodesize, acc)
+#result of random forest
+rf_result <- data.frame(test_set$manhattan, forest_p_hat)
+plot(rf_result)
 
-# #run optimized RF
-# forest_fit2 <- train_set %>%
-#   select(host_id,
-#          room_type,
-#          price,
-#          minimum_nights,
-#          number_of_reviews,
-#          calculated_host_listings_count,
-#          availability_365,
-#          manhattan
-#   ) %>%
-#   randomForest(manhattan ~ ., data=., nodesize = nodesize[which.max(acc)])
-# forest_p_hat2 <- predict(forest_fit2, test_set)
-# confusionMatrix(forest_p_hat2, test_set$manhattan)#$overall["Accuracy"]
-
-# #forest test fit
-# forest_test_fit <- train_set %>%
-#   select(host_id,
-#          room_type,
-#          neighbourhood_group,
-#          neighbourhood,
-#          latitude,
-#          longitude,
-#          minimum_nights,
-#          number_of_reviews,
-#          calculated_host_listings_count,
-#          availability_365,
-#          price
-#   ) %>%
-#   randomForest(price ~ ., data=.)
+#forest only with one predictor
+forest_fit_price <- train_set %>%
+  select(price,
+         manhattan
+  ) %>%
+  randomForest(manhattan ~ ., data=., ntree=500)
