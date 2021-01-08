@@ -15,14 +15,6 @@ library(rpart)
 library(rpart.plot)
 library(randomForest)
 library(rafalib)
-#smoothing and loess example
-# library(broom)
-# mnist_27$train %>% glm(y ~ x_2, family = "binomial", data = .) %>% tidy()
-# qplot(x_2, y, data = mnist_27$train)
-# mnist_27$train %>% 
-#   mutate(y = ifelse(y=="7", 1, 0)) %>%
-#   ggplot(aes(x_2, y)) + 
-#   geom_smooth(method = "loess")
 
 #reading the csv-file
 AirData <- read.csv("AirBnB_NYC.csv")
@@ -187,12 +179,6 @@ train_set %>%
             # rev=mean(number_of_reviews)
   )
 
-
-
-
-
-
-
 #METHODS
 
 #smoothing of average price by longitude (local weighted regression)
@@ -204,9 +190,11 @@ train_set_mprice <- train_set %>%
             manh=mean(neighbourhood_group=="Manhattan")) %>%
   filter(n>=10)
 
+#min and max longitude of manhattan
 min_Manh_long <- min(train_set %>% filter(neighbourhood_group=="Manhattan") %>% select(longitude))
 max_Manh_long <- max(train_set %>% filter(neighbourhood_group=="Manhattan") %>% select(longitude))
 
+#smoothline of price
 train_set_mprice %>% 
   ggplot(aes(l, mprice, col=manh)) + 
   geom_point(size=3) + 
@@ -247,18 +235,6 @@ glm_pre %>%
   geom_point() +
   geom_text(aes(label=mrt))
 
-#linear regression for categorical outcomes
-#as we can see in the plot before there a few individual points where the price is >500 and the mean of manhattan is =0. So we will delete these for the training of the lm
-
-## This is normal lm?! dont need it
-# lm_fit <- train_set %>%
-#   mutate(y = as.numeric(manhattan=="manhattan")) %>%
-#   lm(y ~ price, data = .)
-# 
-# p_hat <- predict(lm_fit, test_set)
-# y_hat <- ifelse(p_hat>0.5, "manhattan", "not_manhattan") %>% factor()
-# confusionMatrix(y_hat, test_set$manhattan)#$overall["Accuracy"]
-
 #logistic regression model (listing in manhattan with several predictors)
 glm_fit <- glm_pre %>% 
   mutate(y = as.numeric(manhattan == "manhattan")) %>%
@@ -285,6 +261,7 @@ p_hat_logit <- predict(glm_fit, newdata = test_set, type = "response")
 y_hat_logit <- ifelse(p_hat_logit > 0.5, "manhattan", "not_manhattan") %>% factor
 confusionMatrix(y_hat_logit, test_set$manhattan)#$overall[["Accuracy"]]
 
+#logistic curve of the logistic regression model
 tmp <- train_set %>% 
   mutate(x = round(price, digits=-1)) %>%
   group_by(x) %>%
@@ -298,18 +275,6 @@ tmp %>%
   geom_line(data = logistic_curve, mapping = aes(x, p_hat), lty = 2) +
   xlab("price") +
   ylab("proportion")
-
-# #GLM TUTORIAL (why different accuracies between my lm(cat) and glm?)
-# #generalized lm (for one or several predictors)
-# fit_log <- glm_pre %>%
-#   glm(manhattan=="manhattan" ~ price, data=., family = "binomial")
-# #or
-# #glm_fit <- train_set %>%
-# #mutate(y=as.numeric(manhattan=="manhattan")) %>%
-# #glm(y ~ price, data=., family = "binomial")
-# p_hat_log <- predict(fit_log, newdata = test_set, type = "response")
-# y_hat_log <- factor(ifelse(p_hat_log > 0.50, "manhattan", "not_manhattan"))
-# confusionMatrix(data=y_hat_log, reference=test_set$manhattan)$overall["Accuracy"]
 
 #10-FOLD CROSS VALIDATION
 control <- trainControl(method = "cv", number = 10, p = .9)
@@ -346,10 +311,14 @@ dec_fit <- glm_pre %>%
   rpart(manhattan ~ ., data=., model=TRUE)
 fit_pred <- predict(dec_fit, test_set, type="class")
 confusionMatrix(table(fit_pred, test_set$manhattan))
-rpart.plot(dec_fit) ##???
-# plot(dec_fit, margin=0.1)
-# text(dec_fit, cex = 0.75)
 
+#ploting decision tree
+rpart.plot(dec_fit)
+#or
+plot(dec_fit, margin=0.1)
+text(dec_fit, cex = 0.75)
+
+#predictors of decision tree in another plot
 glm_pre %>%
   ggplot(aes(room_type, price, col=manhattan, size=calculated_host_listings_count)) +
   geom_point(alpha=0.2)+
@@ -380,11 +349,12 @@ forest_fit <- train_set %>%
          availability_365,
          manhattan
   ) %>%
-  randomForest(manhattan ~ ., data=.)
+  randomForest(manhattan ~ ., data=., ntree=500)
 
 forest_p_hat <- predict(forest_fit, test_set)
 confusionMatrix(forest_p_hat, test_set$manhattan)#$overall["Accuracy"]
 
+#plot trees vs errors
 rafalib::mypar()
 plot(forest_fit)
 
